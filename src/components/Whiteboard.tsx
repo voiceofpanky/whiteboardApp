@@ -11,13 +11,15 @@ import { useCanvas } from '@/hooks/useCanvas';
 import { useSocket } from '@/hooks/useSocket';
 import { useToolHandlers } from '@/hooks/useToolHandlers';
 
-type WhiteboardIconName = Tool | 'undo' | 'redo' | 'save' | 'share';
+type WhiteboardIconName = Tool | 'undo' | 'redo' | 'save' | 'share' | 'zoom-in' | 'zoom-out' | 'pan-up' | 'pan-down' | 'pan-left' | 'pan-right';
 
 const WhiteboardIcon = ({ name }: { name: WhiteboardIconName }) => {
     const iconContent = (() => {
         switch (name) {
             case 'select':
                 return <path d='M5 3l14 11-7 1-3 6L5 3z' />;
+            case 'pan':
+                return <><path d='M12 2v20M2 12h20' /><path d='m8 6 4-4 4 4M8 18l4 4 4-4M6 8l-4 4 4 4M18 8l4 4-4 4' /></>;
             case 'draw':
             case 'pencil':
                 return <><path d='m15 5 4 4' /><path d='M4 20l4.5-1 11-11a2.12 2.12 0 0 0-3-3l-11 11L4 20z' /></>;
@@ -40,6 +42,18 @@ const WhiteboardIcon = ({ name }: { name: WhiteboardIconName }) => {
                 return <><path d='M5 21h14a2 2 0 0 0 2-2V7l-4-4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z' /><path d='M17 21v-8H7v8' /><path d='M7 3v5h8' /></>;
             case 'share':
                 return <><circle cx='18' cy='5' r='3' /><circle cx='6' cy='12' r='3' /><circle cx='18' cy='19' r='3' /><path d='m8.6 10.5 6.8-4' /><path d='m8.6 13.5 6.8 4' /></>;
+            case 'zoom-in':
+                return <><circle cx='10.5' cy='10.5' r='6.5' /><path d='m16 16 5 5M10.5 7v7M7 10.5h7' /></>;
+            case 'zoom-out':
+                return <><circle cx='10.5' cy='10.5' r='6.5' /><path d='m16 16 5 5M7 10.5h7' /></>;
+            case 'pan-up':
+                return <><path d='m5 12 7-7 7 7M12 5v14' /></>;
+            case 'pan-down':
+                return <><path d='m5 12 7 7 7-7M12 19V5' /></>;
+            case 'pan-left':
+                return <><path d='m12 5-7 7 7 7M5 12h14' /></>;
+            case 'pan-right':
+                return <><path d='m12 5 7 7-7 7M19 12H5' /></>;
         }
     })();
 
@@ -60,7 +74,16 @@ const WhiteboardIcon = ({ name }: { name: WhiteboardIconName }) => {
 };
 
 export const Whiteboard = () => {
-    const { canvasRef, fabricCanvas } = useCanvas();
+    const {
+        canvasRef,
+        canvasHostRef,
+        fabricCanvas,
+        zoom,
+        zoomBy,
+        panBy,
+        resetViewport,
+        setPanMode,
+    } = useCanvas();
     const { socketDetails, connectionError, shareBoard } = useSocket(fabricCanvas);
     const toolRef = useRef<Tool>('select');
     const historyRef = useRef<string[]>([]);
@@ -81,7 +104,7 @@ export const Whiteboard = () => {
     });
 
     const toolOptions = useMemo(
-        () => ['select', 'draw', 'erase', 'rectangle', 'line', 'ellipse', 'clear'] as Tool[],
+        () => ['select', 'pan', 'draw', 'erase', 'rectangle', 'line', 'ellipse', 'clear'] as Tool[],
         []
     );
 
@@ -90,8 +113,11 @@ export const Whiteboard = () => {
     }, [state.tool]);
 
     const handleToolClick = useCallback(
-        (t: Tool) => () => setState((prev: WhiteboardState) => ({ ...prev, tool: t })),
-        []
+        (t: Tool) => () => {
+            setPanMode(t === 'pan');
+            setState((prev: WhiteboardState) => ({ ...prev, tool: t }));
+        },
+        [setPanMode]
     );
 
     const handleColorChange = useCallback(
@@ -305,7 +331,7 @@ export const Whiteboard = () => {
 
     return (
         <div className='p-2'>
-            <div className='flex items-center gap-3 bg-gray-100 px-4 py-2 shadow-md sticky top-0 z-10'>
+            <div className='sticky top-0 z-10 flex flex-wrap items-center gap-3 bg-gray-100 px-4 py-2 shadow-md'>
                 {toolOptions.map((t) => (
                     <Button
                         key={t}
@@ -318,6 +344,58 @@ export const Whiteboard = () => {
                         <WhiteboardIcon name={t} />
                     </Button>
                 ))}
+                <div className='flex items-center gap-1 border-l border-gray-300 pl-3'>
+                    <Button
+                        variant='outline'
+                        onClick={() => zoomBy(1 / 1.2)}
+                        disabled={!fabricCanvas || zoom <= 0.1}
+                        aria-label='Zoom out'
+                        title='Zoom out'
+                        className='h-10 w-10 p-0'
+                    >
+                        <WhiteboardIcon name='zoom-out' />
+                    </Button>
+                    <span className='min-w-12 text-center text-sm tabular-nums' aria-live='polite'>
+                        {Math.round(zoom * 100)}%
+                    </span>
+                    <Button
+                        variant='outline'
+                        onClick={() => zoomBy(1.2)}
+                        disabled={!fabricCanvas || zoom >= 4}
+                        aria-label='Zoom in'
+                        title='Zoom in'
+                        className='h-10 w-10 p-0'
+                    >
+                        <WhiteboardIcon name='zoom-in' />
+                    </Button>
+                    <Button
+                        variant='outline'
+                        onClick={() => {
+                            if (!fabricCanvas) return;
+                            resetViewport();
+                        }}
+                        disabled={!fabricCanvas}
+                        aria-label='Reset zoom and position'
+                        title='Reset zoom and position'
+                        className='h-10 px-2 text-xs'
+                    >
+                        Reset
+                    </Button>
+                </div>
+                <div className='flex items-center gap-1 border-l border-gray-300 pl-3' aria-label='Pan canvas'>
+                    <Button variant='outline' onClick={() => panBy(0, 100)} aria-label='Scroll canvas up' title='Scroll up' className='h-10 w-10 p-0'>
+                        <WhiteboardIcon name='pan-up' />
+                    </Button>
+                    <Button variant='outline' onClick={() => panBy(100, 0)} aria-label='Scroll canvas left' title='Scroll left' className='h-10 w-10 p-0'>
+                        <WhiteboardIcon name='pan-left' />
+                    </Button>
+                    <Button variant='outline' onClick={() => panBy(-100, 0)} aria-label='Scroll canvas right' title='Scroll right' className='h-10 w-10 p-0'>
+                        <WhiteboardIcon name='pan-right' />
+                    </Button>
+                    <Button variant='outline' onClick={() => panBy(0, -100)} aria-label='Scroll canvas down' title='Scroll down' className='h-10 w-10 p-0'>
+                        <WhiteboardIcon name='pan-down' />
+                    </Button>
+                </div>
                 <Button
                     variant='outline'
                     onClick={handleUndo}
@@ -421,10 +499,13 @@ export const Whiteboard = () => {
                     </button>
                 </div>
             )}
-            <div className='whiteboard-canvas-host'>
+            <div
+                ref={canvasHostRef}
+                className='whiteboard-canvas-host h-[calc(100vh-180px)] min-h-[320px] w-full overflow-hidden rounded border border-gray-300'
+            >
                 <canvas
                     ref={canvasRef}
-                    className='border border-gray-300 rounded shadow w-full h-[calc(100vh-80px)]'
+                    className='block'
                 />
             </div>
             {socketDetails?.clientId && (

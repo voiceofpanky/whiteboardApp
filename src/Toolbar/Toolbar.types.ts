@@ -1,5 +1,6 @@
 export type Tool =
     | 'select'
+    | 'pan'
     | 'draw'
     | 'rectangle'
     | 'line'
