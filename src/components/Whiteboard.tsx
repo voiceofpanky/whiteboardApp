@@ -379,23 +379,46 @@ export const Whiteboard = () => {
             </div>
             {(shareFeedback || connectionError) && (
                 <div
-                    className={`mt-2 rounded-md px-3 py-2 text-sm ${
+                    className={`mt-2 flex items-center gap-2 rounded-md px-3 py-2 text-sm ${
                         connectionError || shareFeedbackIsError
                             ? 'bg-red-100 text-red-800'
                             : 'bg-green-100 text-green-800'
                     }`}
                     role={connectionError || shareFeedbackIsError ? 'alert' : 'status'}
                 >
-                    {connectionError || shareFeedback}
+                    <span>{connectionError || shareFeedback}</span>
                     {shareLink && (
                         <input
                             aria-label='Whiteboard share link'
-                            className='ml-2 w-full max-w-xl rounded border border-current bg-white px-2 py-1'
+                            className='min-w-0 flex-1 rounded border border-current bg-white px-2 py-1'
                             readOnly
                             value={shareLink}
                             onFocus={(event) => event.currentTarget.select()}
                         />
                     )}
+                    <button
+                        type='button'
+                        className='ml-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-offset-2'
+                        aria-label='Dismiss notification'
+                        title='Dismiss'
+                        onClick={() => {
+                            setShareFeedback(null);
+                            setShareLink(null);
+                            if (connectionError) setShareFeedbackIsError(false);
+                        }}
+                    >
+                        <svg
+                            aria-hidden='true'
+                            className='h-4 w-4'
+                            fill='none'
+                            stroke='currentColor'
+                            strokeLinecap='round'
+                            strokeWidth='2'
+                            viewBox='0 0 24 24'
+                        >
+                            <path d='m6 6 12 12M18 6 6 18' />
+                        </svg>
+                    </button>
                 </div>
             )}
             <div className='whiteboard-canvas-host'>
