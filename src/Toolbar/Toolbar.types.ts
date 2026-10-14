@@ -4,6 +4,7 @@ export type Tool =
     | 'rectangle'
     | 'line'
     | 'ellipse'
+    | 'erase'
     | 'clear'
     | 'pencil'
     | 'circle';
