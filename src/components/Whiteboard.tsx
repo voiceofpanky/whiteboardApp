@@ -11,7 +11,7 @@ import { useCanvas } from '@/hooks/useCanvas';
 import { useSocket } from '@/hooks/useSocket';
 import { useToolHandlers } from '@/hooks/useToolHandlers';
 
-type WhiteboardIconName = Tool | 'undo' | 'redo' | 'save';
+type WhiteboardIconName = Tool | 'undo' | 'redo' | 'save' | 'share';
 
 const WhiteboardIcon = ({ name }: { name: WhiteboardIconName }) => {
     const iconContent = (() => {
@@ -38,6 +38,8 @@ const WhiteboardIcon = ({ name }: { name: WhiteboardIconName }) => {
                 return <><path d='M21 7v6h-6' /><path d='M20 13a8 8 0 1 1-2-5l3 3' /></>;
             case 'save':
                 return <><path d='M5 21h14a2 2 0 0 0 2-2V7l-4-4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z' /><path d='M17 21v-8H7v8' /><path d='M7 3v5h8' /></>;
+            case 'share':
+                return <><circle cx='18' cy='5' r='3' /><circle cx='6' cy='12' r='3' /><circle cx='18' cy='19' r='3' /><path d='m8.6 10.5 6.8-4' /><path d='m8.6 13.5 6.8 4' /></>;
         }
     })();
 
@@ -59,7 +61,7 @@ const WhiteboardIcon = ({ name }: { name: WhiteboardIconName }) => {
 
 export const Whiteboard = () => {
     const { canvasRef, fabricCanvas } = useCanvas();
-    const { socketDetails } = useSocket(fabricCanvas);
+    const { socketDetails, connectionError, shareBoard } = useSocket(fabricCanvas);
     const toolRef = useRef<Tool>('select');
     const historyRef = useRef<string[]>([]);
     const historyIndexRef = useRef(0);
@@ -69,6 +71,9 @@ export const Whiteboard = () => {
         canUndo: false,
         canRedo: false,
     });
+    const [shareLink, setShareLink] = useState<string | null>(null);
+    const [shareFeedback, setShareFeedback] = useState<string | null>(null);
+    const [shareFeedbackIsError, setShareFeedbackIsError] = useState(false);
     const [state, setState] = useState<WhiteboardState>({
         tool: 'select',
         brushColor: '#000000',
@@ -210,6 +215,26 @@ export const Whiteboard = () => {
         downloadLink.click();
     }, [fabricCanvas]);
 
+    const handleShare = useCallback(async () => {
+        setShareFeedback(null);
+        setShareFeedbackIsError(false);
+        try {
+            const url = await shareBoard();
+            setShareLink(url);
+            try {
+                await navigator.clipboard.writeText(url);
+                setShareFeedback('Share link copied to clipboard.');
+            } catch (error) {
+                console.error('Could not copy the share link:', error);
+                setShareFeedback('Room created. Copy the link shown below to share it.');
+            }
+        } catch (error) {
+            console.error('Could not create a share link:', error);
+            setShareFeedbackIsError(true);
+            setShareFeedback(error instanceof Error ? error.message : 'Could not create a share link.');
+        }
+    }, [shareBoard]);
+
     useEffect(() => {
         if (!fabricCanvas) return;
 
@@ -323,6 +348,16 @@ export const Whiteboard = () => {
                 >
                     <WhiteboardIcon name='save' />
                 </Button>
+                <Button
+                    variant='outline'
+                    onClick={handleShare}
+                    disabled={!fabricCanvas || !socketDetails?.clientId}
+                    aria-label='Create and copy share link'
+                    title='Create and copy share link'
+                    className='h-10 w-10 p-0'
+                >
+                    <WhiteboardIcon name='share' />
+                </Button>
                 <div className='flex items-center gap-3 ml-6'>
                     <label className='text-sm'>Color:</label>
                     <Input
@@ -342,10 +377,33 @@ export const Whiteboard = () => {
                     />
                 </div>
             </div>
-            <canvas
-                ref={canvasRef}
-                className='border border-gray-300 rounded shadow w-full h-[calc(100vh-80px)]'
-            />
+            {(shareFeedback || connectionError) && (
+                <div
+                    className={`mt-2 rounded-md px-3 py-2 text-sm ${
+                        connectionError || shareFeedbackIsError
+                            ? 'bg-red-100 text-red-800'
+                            : 'bg-green-100 text-green-800'
+                    }`}
+                    role={connectionError || shareFeedbackIsError ? 'alert' : 'status'}
+                >
+                    {connectionError || shareFeedback}
+                    {shareLink && (
+                        <input
+                            aria-label='Whiteboard share link'
+                            className='ml-2 w-full max-w-xl rounded border border-current bg-white px-2 py-1'
+                            readOnly
+                            value={shareLink}
+                            onFocus={(event) => event.currentTarget.select()}
+                        />
+                    )}
+                </div>
+            )}
+            <div className='whiteboard-canvas-host'>
+                <canvas
+                    ref={canvasRef}
+                    className='border border-gray-300 rounded shadow w-full h-[calc(100vh-80px)]'
+                />
+            </div>
             {socketDetails?.clientId && (
                 <div className='fixed bottom-4 right-4 z-50 p-3 bg-black text-white text-sm rounded-xl shadow-xl opacity-90'>
                     🧩 Connected as:{' '}

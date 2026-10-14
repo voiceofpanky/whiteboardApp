@@ -1,112 +1,196 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import { Canvas, util } from 'fabric';
-import {
-    type ExtendedFabricObject,
-    type SerializedObjectData,
-    type SocketDetails,
-} from '@/types/global.types';
+import type { Canvas } from 'fabric';
+import type { SocketDetails } from '@/types/global.types';
+
+type CanvasState = ReturnType<Canvas['toJSON']>;
+
+interface JoinRoomResponse {
+    ok: boolean;
+    state?: CanvasState;
+    error?: string;
+}
+
+interface RoomStateUpdate {
+    roomId: string;
+    state: CanvasState;
+}
+
+const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || (
+    process.env.NODE_ENV === 'production'
+        ? 'https://stemspark4kids-whiteboard.onrender.com'
+        : 'http://localhost:8080'
+);
 
 export const useSocket = (canvas: Canvas | null) => {
     const socketRef = useRef<Socket | null>(null);
+    const roomIdRef = useRef<string | null>(null);
+    const applyingRemoteStateRef = useRef(false);
+    const remoteStateQueueRef = useRef<Promise<void>>(Promise.resolve());
+    const updateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [socketDetails, setSocketDetails] = useState<SocketDetails | null>(null);
+    const [connectionError, setConnectionError] = useState<string | null>(null);
+
+    const shareBoard = useCallback((): Promise<string> => {
+        const socket = socketRef.current;
+        if (!canvas || !socket?.connected) {
+            return Promise.reject(new Error('The whiteboard server is not connected yet.'));
+        }
+
+        const existingRoomId = roomIdRef.current;
+        const roomId = existingRoomId ?? crypto.randomUUID();
+
+        return new Promise((resolve, reject) => {
+            const join = (error: Error | null, response?: JoinRoomResponse) => {
+                if (error) {
+                    reject(new Error('The server did not respond while creating the share link.'));
+                    return;
+                }
+                if (!response?.ok) {
+                    reject(new Error(response?.error || 'The server could not create this whiteboard room.'));
+                    return;
+                }
+
+                roomIdRef.current = roomId;
+                const url = new URL(window.location.href);
+                url.searchParams.set('room', roomId);
+                window.history.replaceState(window.history.state, '', url);
+                resolve(url.toString());
+            };
+
+            socket.timeout(10000).emit(
+                'room:join',
+                { roomId, initialState: canvas.toJSON() },
+                join
+            );
+        });
+    }, [canvas]);
 
     useEffect(() => {
         if (!canvas) return;
 
-        const socket = io('http://localhost:8080');
+        const socket = io(socketUrl);
         socketRef.current = socket;
 
-        socket.on('connect', () => {
-            setSocketDetails({ clientId: socket.id ?? null });
-        });
+        const applyRoomState = (state: CanvasState) => {
+            if (updateTimerRef.current !== null) {
+                clearTimeout(updateTimerRef.current);
+                updateTimerRef.current = null;
+            }
 
-        const handleObjectAdded = (e: { target: ExtendedFabricObject }) => {
-            if (!e.target || e.target.__skipEmit) return;
-            socket.emit('object:added', e.target.toJSON());
-        };
-        const handleObjectModified = (e: { target: ExtendedFabricObject }) => {
-            if (!e.target || e.target.__skipEmit) return;
-            socket.emit('object:modified', e.target.toJSON());
-        };
-        const handleObjectRemoved = (e: { target: ExtendedFabricObject }) => {
-            if (!e.target || e.target.__skipEmit) return;
-            socket.emit('object:removed', e.target.toJSON());
-        };
-
-        canvas.on('object:added', handleObjectAdded);
-        canvas.on('object:modified', handleObjectModified);
-        canvas.on('object:removed', handleObjectRemoved);
-
-        socket.on('object:added', (objectData: SerializedObjectData) => {
-            util.enlivenObjects([objectData]).then(([obj]) => {
-                if (!obj) return;
-                const extendedObj = obj as ExtendedFabricObject;
-                const alreadyExists = canvas
-                    .getObjects()
-                    .some((o) => (o as ExtendedFabricObject).id === extendedObj.id);
-
-                if (!alreadyExists) {
-                    extendedObj.__skipEmit = true;
-                    canvas.add(extendedObj);
+            remoteStateQueueRef.current = remoteStateQueueRef.current.then(async () => {
+                applyingRemoteStateRef.current = true;
+                try {
+                    await canvas.loadFromJSON(state);
                     canvas.renderAll();
+                } catch (error) {
+                    console.error('Failed to load the shared whiteboard state:', error);
+                    setConnectionError('Could not load the shared whiteboard state.');
+                } finally {
+                    applyingRemoteStateRef.current = false;
                 }
-            }).catch(console.error);
-        });
+            });
+        };
 
-        socket.on('object:modified', (objectData: SerializedObjectData) => {
-            const obj = canvas
-                .getObjects()
-                .find((o) => (o as ExtendedFabricObject).id === objectData.id) as ExtendedFabricObject | undefined;
+        const joinRoomFromUrl = () => {
+            const roomId = new URLSearchParams(window.location.search).get('room');
+            if (!roomId) return;
 
-            if (obj) {
-                obj.__skipEmit = true;
-                obj.set({ ...objectData });
-                canvas.renderAll();
+            socket.timeout(10000).emit(
+                'room:join',
+                { roomId, initialState: canvas.toJSON() },
+                (error: Error | null, response?: JoinRoomResponse) => {
+                    if (error || !response?.ok || !response.state) {
+                        const message = response?.error || 'Could not join this whiteboard room.';
+                        console.error(message, error);
+                        setConnectionError(message);
+                        return;
+                    }
+
+                    roomIdRef.current = roomId;
+                    applyRoomState(response.state);
+                }
+            );
+        };
+
+        const handleConnect = () => {
+            setConnectionError(null);
+            setSocketDetails({ clientId: socket.id ?? null });
+            joinRoomFromUrl();
+        };
+
+        const handleConnectError = (error: Error) => {
+            console.error('Whiteboard socket connection failed:', error);
+            setConnectionError('Cannot connect to the whiteboard server.');
+        };
+
+        const handleDisconnect = () => {
+            setSocketDetails(null);
+        };
+
+        const handleRoomState = (update: RoomStateUpdate) => {
+            if (update.roomId !== roomIdRef.current) return;
+            applyRoomState(update.state);
+        };
+
+        const publishState = () => {
+            if (
+                applyingRemoteStateRef.current ||
+                !roomIdRef.current ||
+                !socket.connected
+            ) {
+                return;
             }
-        });
 
-        socket.on('object:removed', (objectData: SerializedObjectData) => {
-            const obj = canvas
-                .getObjects()
-                .find((o) => (o as ExtendedFabricObject).id === objectData.id) as ExtendedFabricObject | undefined;
-
-            if (obj) {
-                obj.__skipEmit = true;
-                canvas.remove(obj);
-                canvas.renderAll();
+            if (updateTimerRef.current !== null) {
+                clearTimeout(updateTimerRef.current);
             }
-        });
+            updateTimerRef.current = setTimeout(() => {
+                updateTimerRef.current = null;
+                const roomId = roomIdRef.current;
+                if (!roomId || applyingRemoteStateRef.current) return;
+                socket.emit('room:update', {
+                    roomId,
+                    state: canvas.toJSON(),
+                } satisfies RoomStateUpdate);
+            }, 100);
+        };
 
-        socket.on('canvas:clear', () => {
-            canvas.clear();
-        });
+        const handleRoomError = (message: string) => {
+            console.error('Whiteboard room error:', message);
+            setConnectionError(message);
+        };
 
-        socket.on('object:sync', (payload: { objects: SerializedObjectData[] }) => {
-            util.enlivenObjects(payload.objects).then((objects) => {
-                canvas.clear();
-                objects.forEach((obj) => {
-                    const extendedObj = obj as ExtendedFabricObject;
-                    extendedObj.__skipEmit = true;
-                    canvas.add(extendedObj);
-                });
-                canvas.renderAll();
-            }).catch(console.error);
-        });
+        socket.on('connect', handleConnect);
+        socket.on('connect_error', handleConnectError);
+        socket.on('disconnect', handleDisconnect);
+        socket.on('room:state', handleRoomState);
+        socket.on('room:error', handleRoomError);
+        canvas.on('object:added', publishState);
+        canvas.on('object:removed', publishState);
+        canvas.on('object:modified', publishState);
+        canvas.on('path:created', publishState);
+        canvas.on('mouse:up', publishState);
 
         return () => {
-            canvas.off('object:added', handleObjectAdded);
-            canvas.off('object:modified', handleObjectModified);
-            canvas.off('object:removed', handleObjectRemoved);
-            socket.off('object:added');
-            socket.off('object:removed');
-            socket.off('object:modified');
-            socket.off('object:sync');
-            socket.off('canvas:clear');
+            if (updateTimerRef.current !== null) {
+                clearTimeout(updateTimerRef.current);
+            }
+            canvas.off('object:added', publishState);
+            canvas.off('object:removed', publishState);
+            canvas.off('object:modified', publishState);
+            canvas.off('path:created', publishState);
+            canvas.off('mouse:up', publishState);
+            socket.off('connect', handleConnect);
+            socket.off('connect_error', handleConnectError);
+            socket.off('disconnect', handleDisconnect);
+            socket.off('room:state', handleRoomState);
+            socket.off('room:error', handleRoomError);
             socket.disconnect();
             socketRef.current = null;
+            roomIdRef.current = null;
         };
     }, [canvas]);
 
-    return { socketDetails };
+    return { socketDetails, connectionError, shareBoard };
 };
