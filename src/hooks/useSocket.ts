@@ -18,7 +18,7 @@ interface RoomStateUpdate {
 // production url backend : https://whiteboardapp-h2ey.onrender.com
 const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || (
     process.env.NODE_ENV === 'production'
-        ? 'https://stemspark4kids-whiteboard.vercel.app'
+        ? 'https://whiteboardapp-h2ey.onrender.com'
         : 'http://localhost:8080'
 );
 
