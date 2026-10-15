@@ -30,6 +30,9 @@ export const useSocket = (canvas: Canvas | null) => {
     const updateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [socketDetails, setSocketDetails] = useState<SocketDetails | null>(null);
     const [connectionError, setConnectionError] = useState<string | null>(null);
+    const clearConnectionError = useCallback(() => {
+        setConnectionError(null);
+    }, []);
 
     const shareBoard = useCallback((): Promise<string> => {
         const socket = socketRef.current;
@@ -248,5 +251,5 @@ export const useSocket = (canvas: Canvas | null) => {
         };
     }, [canvas]);
 
-    return { socketDetails, connectionError, shareBoard, startNewBoard };
+    return { socketDetails, connectionError, clearConnectionError, shareBoard, startNewBoard };
 };

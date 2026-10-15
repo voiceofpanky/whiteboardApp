@@ -94,7 +94,13 @@ export const Whiteboard = () => {
         resetViewport,
         setPanMode,
     } = useCanvas();
-    const { socketDetails, connectionError, shareBoard, startNewBoard } = useSocket(fabricCanvas);
+    const {
+        socketDetails,
+        connectionError,
+        clearConnectionError,
+        shareBoard,
+        startNewBoard,
+    } = useSocket(fabricCanvas);
     const toolRef = useRef<Tool>('select');
     const historyRef = useRef<string[]>([]);
     const historyIndexRef = useRef(0);
@@ -590,7 +596,8 @@ export const Whiteboard = () => {
                         onClick={() => {
                             setShareFeedback(null);
                             setShareLink(null);
-                            if (connectionError) setShareFeedbackIsError(false);
+                            setShareFeedbackIsError(false);
+                            clearConnectionError();
                         }}
                     >
                         <svg
