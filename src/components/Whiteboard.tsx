@@ -1,7 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { PencilBrush, type FabricObject } from 'fabric';
+import {
+    IText,
+    PencilBrush,
+    type FabricObject,
+    type TPointerEvent,
+    type TPointerEventInfo,
+} from 'fabric';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
@@ -11,7 +17,7 @@ import { useCanvas } from '@/hooks/useCanvas';
 import { useSocket } from '@/hooks/useSocket';
 import { useToolHandlers } from '@/hooks/useToolHandlers';
 
-type WhiteboardIconName = Tool | 'undo' | 'redo' | 'save' | 'share' | 'zoom-in' | 'zoom-out' | 'pan-up' | 'pan-down' | 'pan-left' | 'pan-right';
+type WhiteboardIconName = Tool | 'new-board' | 'undo' | 'redo' | 'save' | 'share' | 'zoom-in' | 'zoom-out' | 'pan-up' | 'pan-down' | 'pan-left' | 'pan-right';
 
 const WhiteboardIcon = ({ name }: { name: WhiteboardIconName }) => {
     const iconContent = (() => {
@@ -20,6 +26,10 @@ const WhiteboardIcon = ({ name }: { name: WhiteboardIconName }) => {
                 return <path d='M5 3l14 11-7 1-3 6L5 3z' />;
             case 'pan':
                 return <><path d='M12 2v20M2 12h20' /><path d='m8 6 4-4 4 4M8 18l4 4 4-4M6 8l-4 4 4 4M18 8l4 4-4 4' /></>;
+            case 'text':
+                return <><path d='M4 5h16M12 5v14M8 19h8' /><path d='M8 5h8' /></>;
+            case 'new-board':
+                return <><path d='M4 4h12v5H4zM4 13h7v7H4z' /><path d='M17 14v6M14 17h6' /></>;
             case 'draw':
             case 'pencil':
                 return <><path d='m15 5 4 4' /><path d='M4 20l4.5-1 11-11a2.12 2.12 0 0 0-3-3l-11 11L4 20z' /></>;
@@ -84,7 +94,7 @@ export const Whiteboard = () => {
         resetViewport,
         setPanMode,
     } = useCanvas();
-    const { socketDetails, connectionError, shareBoard } = useSocket(fabricCanvas);
+    const { socketDetails, connectionError, shareBoard, startNewBoard } = useSocket(fabricCanvas);
     const toolRef = useRef<Tool>('select');
     const historyRef = useRef<string[]>([]);
     const historyIndexRef = useRef(0);
@@ -97,6 +107,7 @@ export const Whiteboard = () => {
     const [shareLink, setShareLink] = useState<string | null>(null);
     const [shareFeedback, setShareFeedback] = useState<string | null>(null);
     const [shareFeedbackIsError, setShareFeedbackIsError] = useState(false);
+    const [toolbarOpen, setToolbarOpen] = useState(false);
     const [state, setState] = useState<WhiteboardState>({
         tool: 'select',
         brushColor: '#000000',
@@ -104,7 +115,7 @@ export const Whiteboard = () => {
     });
 
     const toolOptions = useMemo(
-        () => ['select', 'pan', 'draw', 'erase', 'rectangle', 'line', 'ellipse', 'clear'] as Tool[],
+        () => ['select', 'pan', 'text', 'draw', 'erase', 'rectangle', 'line', 'ellipse', 'clear'] as Tool[],
         []
     );
 
@@ -137,6 +148,30 @@ export const Whiteboard = () => {
         state.brushColor,
         state.brushSize
     );
+
+    const handleTextPlacement = useCallback((event: TPointerEventInfo<TPointerEvent>) => {
+        if (!fabricCanvas || event.target) return;
+
+        const pointer = fabricCanvas.getScenePoint(event.e);
+        const text = new IText('', {
+            left: pointer.x,
+            top: pointer.y,
+            fill: state.brushColor,
+            fontSize: state.brushSize * 6,
+            fontFamily: 'Arial',
+            editable: true,
+        });
+        text.on('editing:exited', () => {
+            if (!text.text.trim()) {
+                fabricCanvas.remove(text);
+            }
+        });
+        fabricCanvas.add(text);
+        fabricCanvas.setActiveObject(text);
+        text.enterEditing();
+        text.selectAll();
+        fabricCanvas.renderAll();
+    }, [fabricCanvas, state.brushColor, state.brushSize]);
 
     useEffect(() => {
         if (!fabricCanvas) return;
@@ -187,6 +222,7 @@ export const Whiteboard = () => {
         fabricCanvas.on('object:modified', scheduleSnapshot);
         fabricCanvas.on('path:created', scheduleSnapshot);
         fabricCanvas.on('mouse:up', scheduleSnapshot);
+        fabricCanvas.on('text:editing:exited', scheduleSnapshot);
 
         return () => {
             if (captureTimerRef.current !== null) {
@@ -197,6 +233,7 @@ export const Whiteboard = () => {
             fabricCanvas.off('object:modified', scheduleSnapshot);
             fabricCanvas.off('path:created', scheduleSnapshot);
             fabricCanvas.off('mouse:up', scheduleSnapshot);
+            fabricCanvas.off('text:editing:exited', scheduleSnapshot);
         };
     }, [fabricCanvas]);
 
@@ -249,7 +286,7 @@ export const Whiteboard = () => {
             setShareLink(url);
             try {
                 await navigator.clipboard.writeText(url);
-                setShareFeedback('Share link copied to clipboard.');
+                setShareFeedback('      Share link copied to clipboard.');
             } catch (error) {
                 console.error('Could not copy the share link:', error);
                 setShareFeedback('Room created. Copy the link shown below to share it.');
@@ -260,6 +297,30 @@ export const Whiteboard = () => {
             setShareFeedback(error instanceof Error ? error.message : 'Could not create a share link.');
         }
     }, [shareBoard]);
+
+    const handleNewBoard = useCallback(async () => {
+        if (!fabricCanvas) return;
+        setShareFeedback(null);
+        setShareFeedbackIsError(false);
+        try {
+            const url = await startNewBoard();
+            if (captureTimerRef.current !== null) {
+                clearTimeout(captureTimerRef.current);
+                captureTimerRef.current = null;
+            }
+            historyRef.current = [JSON.stringify(fabricCanvas.toJSON())];
+            historyIndexRef.current = 0;
+            setHistoryAvailability({ canUndo: false, canRedo: false });
+            setPanMode(false);
+            setState((previous) => ({ ...previous, tool: 'select' }));
+            setShareLink(url);
+            setShareFeedback('     New whiteboard created. Share the link below to invite others.');
+        } catch (error) {
+            console.error('Could not create a new whiteboard:', error);
+            setShareFeedbackIsError(true);
+            setShareFeedback(error instanceof Error ? error.message : 'Could not create a new whiteboard.');
+        }
+    }, [fabricCanvas, setPanMode, startNewBoard]);
 
     useEffect(() => {
         if (!fabricCanvas) return;
@@ -304,6 +365,10 @@ export const Whiteboard = () => {
                 });
                 break;
             }
+            case 'text': {
+                fabricCanvas.on('mouse:down', handleTextPlacement);
+                break;
+            }
             case 'clear': {
                 fabricCanvas.clear();
                 fabricCanvas.set('backgroundColor', '#fff');
@@ -326,20 +391,62 @@ export const Whiteboard = () => {
         handleMouseDown,
         handleMouseMove,
         handleMouseUp,
+        handleTextPlacement,
         fabricCanvas,
     ]);
 
     return (
         <div className='p-2'>
-            <div className='sticky top-0 z-10 flex flex-wrap items-center gap-3 bg-gray-100 px-4 py-2 shadow-md'>
+            <h1 className='pointer-events-none fixed left-1/2 top-3 z-30 -translate-x-1/2 whitespace-nowrap rounded-lg border border-green-300 bg-green-50 px-4 py-2 font-sans text-lg font-semibold tracking-tight text-green-900 shadow-md sm:text-xl'>
+                StemSpark4kids Whiteboard
+            </h1>
+            <Button
+                variant='outline'
+                onClick={() => setToolbarOpen((open) => !open)}
+                aria-label={toolbarOpen ? 'Hide toolbar' : 'Show toolbar'}
+                aria-expanded={toolbarOpen}
+                aria-controls='whiteboard-toolbar'
+                title={toolbarOpen ? 'Hide toolbar' : 'Show toolbar'}
+                className='fixed left-4 top-4 z-50 h-10 w-10 p-0 shadow-md'
+            >
+                <svg
+                    aria-hidden='true'
+                    className='h-5 w-5'
+                    fill='none'
+                    stroke='currentColor'
+                    strokeLinecap='round'
+                    strokeLinejoin='round'
+                    strokeWidth='2'
+                    viewBox='0 0 24 24'
+                >
+                    {toolbarOpen
+                        ? <path d='m6 6 12 12M18 6 6 18' />
+                        : <path d='M4 6h16M4 12h16M4 18h16' />}
+                </svg>
+            </Button>
+            {toolbarOpen && (
+            <div
+                id='whiteboard-toolbar'
+                className='fixed left-2 right-2 top-14 z-40 flex max-h-[calc(100dvh-4rem)] flex-wrap items-center gap-3 overflow-y-auto rounded bg-gray-100/95 px-4 py-2 shadow-md backdrop-blur'
+            >
+                <Button
+                    variant='outline'
+                    onClick={handleNewBoard}
+                    disabled={!fabricCanvas || !socketDetails?.clientId}
+                    aria-label='Create new whiteboard'
+                    title='Create new whiteboard'
+                    className='h-10 w-10 p-0'
+                >
+                    <WhiteboardIcon name='new-board' />
+                </Button>
                 {toolOptions.map((t) => (
                     <Button
                         key={t}
                         variant={state.tool === t ? 'default' : 'outline'}
                         onClick={handleToolClick(t)}
                         className='h-10 w-10 p-0'
-                        aria-label={t === 'erase' ? 'Eraser' : t.charAt(0).toUpperCase() + t.slice(1)}
-                        title={t === 'erase' ? 'Eraser' : t.charAt(0).toUpperCase() + t.slice(1)}
+                        aria-label={t === 'erase' ? 'Eraser' : t === 'text' ? 'Add text' : t.charAt(0).toUpperCase() + t.slice(1)}
+                        title={t === 'erase' ? 'Eraser' : t === 'text' ? 'Add text' : t.charAt(0).toUpperCase() + t.slice(1)}
                     >
                         <WhiteboardIcon name={t} />
                     </Button>
@@ -455,12 +562,13 @@ export const Whiteboard = () => {
                     />
                 </div>
             </div>
+            )}
             {(shareFeedback || connectionError) && (
                 <div
-                    className={`mt-2 flex items-center gap-2 rounded-md px-3 py-2 text-sm ${
+                    className={`fixed left-14 right-4 top-2 z-[35] flex max-h-[40vh] items-center gap-2 overflow-auto rounded-lg border px-4 py-3 text-sm shadow-xl ${
                         connectionError || shareFeedbackIsError
-                            ? 'bg-red-100 text-red-800'
-                            : 'bg-green-100 text-green-800'
+                            ? 'border-red-300 bg-red-50 text-red-900'
+                            : 'border-green-300 bg-green-50 text-green-900'
                     }`}
                     role={connectionError || shareFeedbackIsError ? 'alert' : 'status'}
                 >
@@ -501,7 +609,7 @@ export const Whiteboard = () => {
             )}
             <div
                 ref={canvasHostRef}
-                className='whiteboard-canvas-host h-[calc(100vh-180px)] min-h-[320px] w-full overflow-hidden rounded border border-gray-300'
+                className='whiteboard-canvas-host h-[calc(100dvh-1rem)] min-h-[320px] w-full overflow-hidden rounded border border-gray-300'
             >
                 <canvas
                     ref={canvasRef}
@@ -510,10 +618,10 @@ export const Whiteboard = () => {
             </div>
             {socketDetails?.clientId && (
                 <div className='fixed bottom-4 right-4 z-50 p-3 bg-black text-white text-sm rounded-xl shadow-xl opacity-90'>
-                    🧩 Connected as:{' '}
-                    <span className='font-mono text-green-300'>
+                    🧩 Connected {' '}
+                    {/* <span className='font-mono text-green-300'>
                         {socketDetails.clientId}
-                    </span>
+                    </span> */}
                 </div>
             )}
         </div>

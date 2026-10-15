@@ -66,6 +66,58 @@ export const useSocket = (canvas: Canvas | null) => {
         });
     }, [canvas]);
 
+    const startNewBoard = useCallback((): Promise<string> => {
+        const socket = socketRef.current;
+        if (!canvas || !socket?.connected) {
+            return Promise.reject(new Error('The whiteboard server is not connected yet.'));
+        }
+
+        const roomId = crypto.randomUUID();
+        const initialState = { ...canvas.toJSON(), objects: [] };
+        const previousRoomId = roomIdRef.current;
+
+        if (updateTimerRef.current !== null) {
+            clearTimeout(updateTimerRef.current);
+            updateTimerRef.current = null;
+            if (previousRoomId) {
+                socket.emit('room:update', {
+                    roomId: previousRoomId,
+                    state: canvas.toJSON(),
+                } satisfies RoomStateUpdate);
+            }
+        }
+
+        return new Promise((resolve, reject) => {
+            socket.timeout(10000).emit(
+                'room:join',
+                { roomId, initialState },
+                (error: Error | null, response?: JoinRoomResponse) => {
+                    if (error) {
+                        reject(new Error('The server did not respond while creating a new whiteboard.'));
+                        return;
+                    }
+                    if (!response?.ok) {
+                        reject(new Error(response?.error || 'The server could not create a new whiteboard.'));
+                        return;
+                    }
+
+                    roomIdRef.current = roomId;
+                    if (previousRoomId) {
+                        socket.emit('room:leave', { roomId: previousRoomId });
+                    }
+                    canvas.clear();
+                    canvas.set('backgroundColor', '#fff');
+                    canvas.renderAll();
+
+                    const url = new URL(window.location.href);
+                    url.searchParams.set('room', roomId);
+                    window.history.replaceState(window.history.state, '', url);
+                    resolve(url.toString());
+                }
+            );
+        });
+    }, [canvas]);
+
     useEffect(() => {
         if (!canvas) return;
 
@@ -171,6 +223,8 @@ export const useSocket = (canvas: Canvas | null) => {
         canvas.on('object:modified', publishState);
         canvas.on('path:created', publishState);
         canvas.on('mouse:up', publishState);
+        canvas.on('text:changed', publishState);
+        canvas.on('text:editing:exited', publishState);
 
         return () => {
             if (updateTimerRef.current !== null) {
@@ -181,6 +235,8 @@ export const useSocket = (canvas: Canvas | null) => {
             canvas.off('object:modified', publishState);
             canvas.off('path:created', publishState);
             canvas.off('mouse:up', publishState);
+            canvas.off('text:changed', publishState);
+            canvas.off('text:editing:exited', publishState);
             socket.off('connect', handleConnect);
             socket.off('connect_error', handleConnectError);
             socket.off('disconnect', handleDisconnect);
@@ -192,5 +248,5 @@ export const useSocket = (canvas: Canvas | null) => {
         };
     }, [canvas]);
 
-    return { socketDetails, connectionError, shareBoard };
+    return { socketDetails, connectionError, shareBoard, startNewBoard };
 };

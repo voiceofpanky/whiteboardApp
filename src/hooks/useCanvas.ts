@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Canvas, FabricObject, Point } from 'fabric';
+import { ActiveSelection, Canvas, FabricObject, IText, Point } from 'fabric';
 import { ExtendedFabricObject } from '@/types/global.types';
 import { generateId } from '@/components/Whiteboard/Whiteboard.utils';
 
@@ -9,6 +9,8 @@ export const useCanvas = () => {
     const canvasInstanceRef = useRef<Canvas | null>(null);
     const panModeRef = useRef(false);
     const panStartRef = useRef<{ x: number; y: number } | null>(null);
+    const clipboardRef = useRef<FabricObject[]>([]);
+    const pasteCountRef = useRef(0);
     const [fabricCanvas, setFabricCanvas] = useState<Canvas | null>(null);
     const [zoom, setZoom] = useState(1);
 
@@ -131,10 +133,75 @@ export const useCanvas = () => {
             const resizeObserver = new ResizeObserver(resize);
             resizeObserver.observe(canvasHost);
             const handleKeyDown = (e: KeyboardEvent) => {
+                const target = e.target;
+                const isEditableElement =
+                    target instanceof HTMLElement &&
+                    (target.isContentEditable ||
+                        target instanceof HTMLInputElement ||
+                        target instanceof HTMLTextAreaElement ||
+                        target instanceof HTMLSelectElement);
+                if (isEditableElement) return;
+
+                const activeObject = canvas.getActiveObject();
+                if (activeObject instanceof IText && activeObject.isEditing) return;
+
+                const isCopy = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c';
+                const isPaste = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v';
+
+                if (isCopy) {
+                    const selectedObjects = canvas.getActiveObjects();
+                    if (selectedObjects.length === 0) return;
+                    e.preventDefault();
+                    void Promise.all(selectedObjects.map((object) => object.clone()))
+                        .then((objects) => {
+                            clipboardRef.current = objects;
+                            pasteCountRef.current = 0;
+                        })
+                        .catch((error: unknown) => {
+                            console.error('Could not copy the selected whiteboard objects:', error);
+                        });
+                    return;
+                }
+
+                if (isPaste) {
+                    if (clipboardRef.current.length === 0) return;
+                    e.preventDefault();
+                    const offset = 20 * ++pasteCountRef.current;
+                    void Promise.all(clipboardRef.current.map((object) => object.clone()))
+                        .then((objects) => {
+                            objects.forEach((object) => {
+                                object.set({
+                                    left: (object.left ?? 0) + offset,
+                                    top: (object.top ?? 0) + offset,
+                                    selectable: true,
+                                    evented: true,
+                                });
+                                const extendedObject = object as ExtendedFabricObject;
+                                extendedObject.id = generateId();
+                                delete extendedObject.__skipEmit;
+                                object.setCoords();
+                            });
+
+                            canvas.discardActiveObject();
+                            canvas.add(...objects);
+                            if (objects.length === 1) {
+                                canvas.setActiveObject(objects[0]);
+                            } else {
+                                canvas.setActiveObject(new ActiveSelection(objects, { canvas }));
+                            }
+                            canvas.requestRenderAll();
+                        })
+                        .catch((error: unknown) => {
+                            console.error('Could not paste the copied whiteboard objects:', error);
+                        });
+                    return;
+                }
+
                 if (e.key === 'Delete' || e.key === 'Backspace') {
-                    const active = canvas.getActiveObject();
-                    if (active) {
-                        canvas.remove(active);
+                    const selectedObjects = canvas.getActiveObjects();
+                    if (selectedObjects.length > 0) {
+                        canvas.remove(...selectedObjects);
+                        canvas.discardActiveObject();
                         canvas.renderAll();
                     }
                 }
@@ -143,6 +210,7 @@ export const useCanvas = () => {
             return () => {
                 resizeObserver.disconnect();
                 window.removeEventListener('keydown', handleKeyDown);
+                clipboardRef.current = [];
                 canvasElement.removeEventListener('wheel', handleWheel);
                 canvasElement.removeEventListener('pointerdown', handlePointerDown);
                 canvasElement.removeEventListener('pointermove', handlePointerMove);

@@ -43,6 +43,12 @@ const io = new Server(httpServer, {
 });
 
 io.on('connection', (socket) => {
+    socket.on('room:leave', ({ roomId } = {}) => {
+        if (typeof roomId === 'string' && roomIdPattern.test(roomId)) {
+            socket.leave(roomId);
+        }
+    });
+
     socket.on('room:join', (payload, acknowledge) => {
         if (typeof acknowledge !== 'function') return;
 

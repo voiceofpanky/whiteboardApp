@@ -14,6 +14,20 @@ pnpm dev
 bun dev
 ```
 
+```
+1. Install Command: npm ci
+2. Build Command: npm run build
+3. Development Command: npm run dev
+4. Framework Preset: Next.js
+5. Output Directory: leave blank/default
+```
+
+```server setup
+- Build command: `npm ci`
+- Start command: `npm run socket-server`
+- Health check path: `/health`
+```
+
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
