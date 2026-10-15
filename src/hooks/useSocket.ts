@@ -15,10 +15,10 @@ interface RoomStateUpdate {
     roomId: string;
     state: CanvasState;
 }
-
+// production url backend : https://whiteboardapp-h2ey.onrender.com
 const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || (
     process.env.NODE_ENV === 'production'
-        ? 'https://whiteboardapp-h2ey.onrender.com'
+        ? 'https://stemspark4kids-whiteboard.vercel.app:8080'
         : 'http://localhost:8080'
 );
 
