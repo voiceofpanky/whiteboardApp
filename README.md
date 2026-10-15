@@ -22,7 +22,7 @@ bun dev
 5. Output Directory: leave blank/default
 ```
 
-```server setup
+```server setup , either vercel or render
 - Build command: `npm ci`
 - Start command: `npm run socket-server`
 - Health check path: `/health`

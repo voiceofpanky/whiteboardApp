@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "socket-server": "node server.mjs",
-    "lint": "eslint"
+    "lint": "eslint",
+    "dev:all": "concurrently \"npm run dev\" \"npm run socket-server\""
   },
   "dependencies": {
     "fabric": "^7.4.0",
@@ -22,6 +23,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^9.2.5",
     "eslint": "^9",
     "eslint-config-next": "^16.4.0",
     "tailwindcss": "^4",
