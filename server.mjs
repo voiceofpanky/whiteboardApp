@@ -16,14 +16,26 @@ const maxStateSize = 2_000_000;
 const roomIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 let rooms = {};
+let roomChatMessages = {};
 if (existsSync(roomsFile)) {
-    rooms = JSON.parse(readFileSync(roomsFile, 'utf8'));
+    const savedData = JSON.parse(readFileSync(roomsFile, 'utf8'));
+    if (
+        savedData &&
+        typeof savedData === 'object' &&
+        Object.prototype.hasOwnProperty.call(savedData, 'rooms') &&
+        Object.prototype.hasOwnProperty.call(savedData, 'chatMessages')
+    ) {
+        rooms = savedData.rooms;
+        roomChatMessages = savedData.chatMessages;
+    } else {
+        rooms = savedData;
+    }
 }
 
 const persistRooms = () => {
     mkdirSync(path.dirname(roomsFile), { recursive: true });
     const temporaryFile = `${roomsFile}.tmp`;
-    writeFileSync(temporaryFile, JSON.stringify(rooms), 'utf8');
+    writeFileSync(temporaryFile, JSON.stringify({ rooms, chatMessages: roomChatMessages }), 'utf8');
     renameSync(temporaryFile, roomsFile);
 };
 
@@ -115,7 +127,12 @@ io.on('connection', (socket) => {
         socket.join(roomId);
         const participants = getRoomParticipants(roomId);
         broadcastRoomParticipants(roomId);
-        acknowledge({ ok: true, state: rooms[roomId], participants });
+        acknowledge({
+            ok: true,
+            state: rooms[roomId],
+            participants,
+            chatMessages: roomChatMessages[roomId] || [],
+        });
     });
 
     socket.on('disconnecting', () => {
@@ -143,14 +160,26 @@ io.on('connection', (socket) => {
             return;
         }
 
+        const message = {
+            id: randomUUID(),
+            senderName: socket.data.participantName || 'Guest',
+            text: text.trim(),
+            sentAt: Date.now(),
+        };
+        const previousMessages = roomChatMessages[roomId] || [];
+        roomChatMessages[roomId] = [...previousMessages, message].slice(-200);
+        try {
+            persistRooms();
+        } catch (error) {
+            console.error(`Could not persist chat messages for whiteboard room ${roomId}:`, error);
+            roomChatMessages[roomId] = previousMessages;
+            acknowledge({ ok: false, error: 'Could not save this chat message.' });
+            return;
+        }
+
         io.to(roomId).emit('chat:message', {
             roomId,
-            message: {
-                id: randomUUID(),
-                senderName: socket.data.participantName || 'Guest',
-                text: text.trim(),
-                sentAt: Date.now(),
-            },
+            message,
         });
         acknowledge({ ok: true });
     });

@@ -436,7 +436,7 @@ export const Whiteboard = () => {
     return (
         <div className='p-2'>
             <h1 className='pointer-events-none fixed left-1/2 top-3 z-30 -translate-x-1/2 whitespace-nowrap rounded-lg border border-green-300 bg-green-50 px-4 py-2 font-sans text-lg font-semibold tracking-tight text-green-900 shadow-md sm:text-xl'>
-                StemSpark4kids-Whiteboard
+                Interactive-Whiteboard
             </h1>
             <aside
                 aria-label='Whiteboard chat and participants'

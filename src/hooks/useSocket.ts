@@ -10,6 +10,7 @@ interface JoinRoomResponse {
     state?: CanvasState;
     error?: string;
     participants?: string[];
+    chatMessages?: ChatMessage[];
 }
 
 interface RoomStateUpdate {
@@ -51,17 +52,37 @@ export const useSocket = (canvas: Canvas | null) => {
     const applyingRemoteStateRef = useRef(false);
     const remoteStateQueueRef = useRef<Promise<void>>(Promise.resolve());
     const updateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const participantNameRef = useRef<string | null>(null);
+    const participantNamesRef = useRef(new Map<string, string>());
     const [socketDetails, setSocketDetails] = useState<SocketDetails | null>(null);
     const [participants, setParticipants] = useState<string[]>([]);
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [connectionError, setConnectionError] = useState<string | null>(null);
-    const getParticipantName = useCallback(() => {
-        if (participantNameRef.current) return participantNameRef.current;
+    const getParticipantName = useCallback((roomId: string) => {
+        const cachedName = participantNamesRef.current.get(roomId);
+        if (cachedName) return cachedName;
+
+        const storageKey = `whiteboard-participant-name:${roomId}`;
+        try {
+            const savedName = window.localStorage.getItem(storageKey);
+            if (savedName !== null) {
+                participantNamesRef.current.set(roomId, savedName);
+                return savedName;
+            }
+        } catch (error) {
+            console.error('Could not load the saved name for this whiteboard:', error);
+            setConnectionError('Could not remember your name for this whiteboard. You may be asked again next time.');
+        }
 
         const enteredName = window.prompt('Enter your name to join this whiteboard (cancel or leave blank to join as Guest):');
-        participantNameRef.current = enteredName?.trim().slice(0, 40) || 'Guest';
-        return participantNameRef.current;
+        const participantName = enteredName?.trim().slice(0, 40) || 'Guest';
+        participantNamesRef.current.set(roomId, participantName);
+        try {
+            window.localStorage.setItem(storageKey, participantName);
+        } catch (error) {
+            console.error('Could not save the name for this whiteboard:', error);
+            setConnectionError('Could not remember your name for this whiteboard. You may be asked again next time.');
+        }
+        return participantName;
     }, []);
     const clearConnectionError = useCallback(() => {
         setConnectionError(null);
@@ -102,9 +123,9 @@ export const useSocket = (canvas: Canvas | null) => {
             return Promise.reject(new Error('The whiteboard server is not connected yet.'));
         }
 
-        const participantName = getParticipantName();
         const existingRoomId = roomIdRef.current;
         const roomId = existingRoomId ?? crypto.randomUUID();
+        const participantName = getParticipantName(roomId);
 
         return new Promise((resolve, reject) => {
             const join = (error: Error | null, response?: JoinRoomResponse) => {
@@ -118,7 +139,7 @@ export const useSocket = (canvas: Canvas | null) => {
                 }
 
                 roomIdRef.current = roomId;
-                if (existingRoomId !== roomId) setChatMessages([]);
+                setChatMessages(response.chatMessages ?? []);
                 setParticipants(response.participants ?? [participantName]);
                 const url = new URL(window.location.href);
                 url.searchParams.set('room', roomId);
@@ -140,8 +161,8 @@ export const useSocket = (canvas: Canvas | null) => {
             return Promise.reject(new Error('The whiteboard server is not connected yet.'));
         }
 
-        const participantName = getParticipantName();
         const roomId = crypto.randomUUID();
+        const participantName = getParticipantName(roomId);
         const initialState = { ...canvas.toJSON(), objects: [] };
         const previousRoomId = roomIdRef.current;
 
@@ -171,7 +192,7 @@ export const useSocket = (canvas: Canvas | null) => {
                     }
 
                     roomIdRef.current = roomId;
-                    setChatMessages([]);
+                    setChatMessages(response.chatMessages ?? []);
                     setParticipants(response.participants ?? [participantName]);
                     if (previousRoomId) {
                         socket.emit('room:leave', { roomId: previousRoomId });
@@ -219,7 +240,7 @@ export const useSocket = (canvas: Canvas | null) => {
             const roomId = new URLSearchParams(window.location.search).get('room');
             if (!roomId) return;
 
-            const participantName = getParticipantName();
+            const participantName = getParticipantName(roomId);
             socket.timeout(10000).emit(
                 'room:join',
                 { roomId, initialState: canvas.toJSON(), participantName },
@@ -231,9 +252,8 @@ export const useSocket = (canvas: Canvas | null) => {
                         return;
                     }
 
-                    const previousRoomId = roomIdRef.current;
                     roomIdRef.current = roomId;
-                    if (previousRoomId !== roomId) setChatMessages([]);
+                    setChatMessages(response.chatMessages ?? []);
                     setParticipants(response.participants ?? [participantName]);
                     applyRoomState(response.state);
                 }

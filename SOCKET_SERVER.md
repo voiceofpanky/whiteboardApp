@@ -20,5 +20,7 @@ development, run `npm run dev` and `npm run socket-server` in separate
 terminals; the client defaults to `http://localhost:8080`.
 
 Share links contain a randomly generated room ID. The server stores each room's
-latest canvas state and broadcasts changes to other connected clients in that
-room. The persistent disk keeps that state available after a server restart.
+latest canvas state and the latest 200 chat messages, and broadcasts changes to
+other connected clients in that room. The persistent disk keeps both available
+after a page refresh or server restart. Existing room files using the previous
+canvas-only format are read and migrated on the next save.
