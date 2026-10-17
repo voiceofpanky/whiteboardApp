@@ -688,6 +688,16 @@ export const Whiteboard = () => {
             >
                 <Button
                     variant='outline'
+                    onClick={handleShare}
+                    disabled={!fabricCanvas || !socketDetails?.clientId}
+                    aria-label='Create and copy share link'
+                    title='Create and copy share link'
+                    className='h-10 w-10 shrink-0 p-0'
+                >
+                    <WhiteboardIcon name='share' />
+                </Button>
+                <Button
+                    variant='outline'
                     onClick={handleClipboardImagePaste}
                     disabled={!fabricCanvas}
                     aria-label='Paste image from clipboard'
@@ -736,6 +746,7 @@ export const Whiteboard = () => {
                     )}
                 </div>
                 {([
+                    { tool: 'select', label: 'Select' },
                     { tool: 'erase', label: 'Eraser' },
                     { tool: 'pan', label: 'Pan' },
                     { tool: 'text', label: 'Text' },

@@ -17,11 +17,14 @@ on the canvas. The selected tool is highlighted.
 A floating toolbar at the bottom of the screen provides quick access to common
 actions:
 
+- **Share link**: Create or reuse a link for the current board and copy it to
+  the clipboard. Requires a connection to the whiteboard server.
 - **Paste image**: Copy an image, then choose this button to add it at the center
   of the visible canvas. You can also paste an image with **Ctrl+V** on
   Windows/Linux or **Command+V** on macOS while the canvas is active. The image
   is added as a selectable canvas object.
 - **Pencil**: Choose red, black, or green to start drawing with that color.
+- **Select**: Select, move, or resize objects on the canvas.
 - **Eraser**: Paint over existing content with white.
 - **Pan**: Drag the canvas to move around without drawing.
 - **Text**: Click the canvas to add a text object.
