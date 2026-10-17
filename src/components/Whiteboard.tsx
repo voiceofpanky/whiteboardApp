@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import {
+    FabricImage,
     IText,
     PencilBrush,
     type FabricObject,
@@ -17,9 +18,9 @@ import { useCanvas } from '@/hooks/useCanvas';
 import { useSocket } from '@/hooks/useSocket';
 import { useToolHandlers } from '@/hooks/useToolHandlers';
 
-type WhiteboardIconName = Tool | 'new-board' | 'undo' | 'redo' | 'save' | 'share' | 'zoom-in' | 'zoom-out' | 'pan-up' | 'pan-down' | 'pan-left' | 'pan-right';
+type WhiteboardIconName = Tool | 'image' | 'new-board' | 'undo' | 'redo' | 'save' | 'share' | 'zoom-in' | 'zoom-out' | 'pan-up' | 'pan-down' | 'pan-left' | 'pan-right';
 
-const WhiteboardIcon = ({ name, active = false }: { name: WhiteboardIconName; active?: boolean }) => {
+const WhiteboardIcon = ({ name, active = false, color }: { name: WhiteboardIconName; active?: boolean; color?: string }) => {
     const isPencil = name === 'draw' || name === 'pencil';
     const iconContent = (() => {
         switch (name) {
@@ -29,6 +30,8 @@ const WhiteboardIcon = ({ name, active = false }: { name: WhiteboardIconName; ac
                 return <><path d='M12 2v20M2 12h20' /><path d='m8 6 4-4 4 4M8 18l4 4 4-4M6 8l-4 4 4 4M18 8l4 4-4 4' /></>;
             case 'text':
                 return <><path d='M4 5h16M12 5v14M8 19h8' /><path d='M8 5h8' /></>;
+            case 'image':
+                return <><rect x='3' y='3' width='18' height='18' rx='2' /><circle cx='8.5' cy='8.5' r='1.5' /><path d='m21 15-5-5L5 21' /></>;
             case 'new-board':
                 return <><path d='M4 4h12v5H4zM4 13h7v7H4z' /><path d='M17 14v6M14 17h6' /></>;
             case 'draw':
@@ -71,12 +74,13 @@ const WhiteboardIcon = ({ name, active = false }: { name: WhiteboardIconName; ac
     return (
         <svg
             aria-hidden='true'
-            className={`h-5 w-5${isPencil ? ` ${active ? 'text-white' : 'text-gray-700'}` : ''}`}
+            className={`h-5 w-5${isPencil && !color ? ` ${active ? 'text-white' : 'text-gray-700'}` : ''}`}
             fill='none'
             stroke='currentColor'
             strokeLinecap='round'
             strokeLinejoin='round'
             strokeWidth={isPencil ? '2.2' : '1.8'}
+            style={color ? { color } : undefined}
             viewBox='0 0 24 24'
         >
             {iconContent}
@@ -117,7 +121,9 @@ export const Whiteboard = () => {
     const [shareLink, setShareLink] = useState<string | null>(null);
     const [shareFeedback, setShareFeedback] = useState<string | null>(null);
     const [shareFeedbackIsError, setShareFeedbackIsError] = useState(false);
+    const [quickToolError, setQuickToolError] = useState<string | null>(null);
     const [toolbarOpen, setToolbarOpen] = useState(false);
+    const [pencilPaletteOpen, setPencilPaletteOpen] = useState(false);
     const [sidePanelOpen, setSidePanelOpen] = useState(false);
     const [sidePanelTab, setSidePanelTab] = useState<'chat' | 'participants'>('chat');
     const [chatDraft, setChatDraft] = useState('');
@@ -179,6 +185,99 @@ export const Whiteboard = () => {
         (val: number[]) => setState((prev: WhiteboardState) => ({ ...prev, brushSize: val[0] ?? 1 })),
         []
     );
+
+    const insertImageFromBlob = useCallback(async (blob: Blob) => {
+        if (!fabricCanvas) return;
+
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                if (typeof reader.result === 'string') {
+                    resolve(reader.result);
+                } else {
+                    reject(new Error('The clipboard image could not be read.'));
+                }
+            };
+            reader.onerror = () => reject(reader.error ?? new Error('The clipboard image could not be read.'));
+            reader.readAsDataURL(blob);
+        });
+        const image = await FabricImage.fromURL(dataUrl);
+        const center = fabricCanvas.getVpCenter();
+        const maxWidth = fabricCanvas.getWidth() * 0.6;
+        const maxHeight = fabricCanvas.getHeight() * 0.6;
+        const scale = Math.min(1, maxWidth / image.width, maxHeight / image.height);
+        image.set({
+            left: center.x - image.width * scale / 2,
+            top: center.y - image.height * scale / 2,
+            scaleX: scale,
+            scaleY: scale,
+        });
+        fabricCanvas.add(image);
+        fabricCanvas.setActiveObject(image);
+        fabricCanvas.requestRenderAll();
+    }, [fabricCanvas]);
+
+    const handleClipboardImagePaste = useCallback(async () => {
+        setQuickToolError(null);
+        try {
+            if (!navigator.clipboard?.read) {
+                throw new Error('Clipboard image access is unavailable. Copy an image, then press Ctrl+V or Command+V on the canvas.');
+            }
+
+            const clipboardItems = await navigator.clipboard.read();
+            for (const item of clipboardItems) {
+                const imageType = item.types.find((type) => type.startsWith('image/'));
+                if (imageType) {
+                    await insertImageFromBlob(await item.getType(imageType));
+                    return;
+                }
+            }
+            throw new Error('No image was found in the clipboard. Copy an image and try again.');
+        } catch (error) {
+            console.error('Could not paste an image onto the whiteboard:', error);
+            setQuickToolError(error instanceof Error ? error.message : 'Could not paste the clipboard image.');
+        }
+    }, [insertImageFromBlob]);
+
+    useEffect(() => {
+        if (!fabricCanvas) return;
+
+        const handlePaste = (event: ClipboardEvent) => {
+            const target = event.target;
+            if (
+                target instanceof HTMLElement &&
+                (target.isContentEditable ||
+                    target instanceof HTMLInputElement ||
+                    target instanceof HTMLTextAreaElement ||
+                    target instanceof HTMLSelectElement)
+            ) {
+                return;
+            }
+            const activeObject = fabricCanvas.getActiveObject();
+            if (activeObject instanceof IText && activeObject.isEditing) return;
+
+            const imageFile = Array.from(event.clipboardData?.items ?? [])
+                .find((item) => item.type.startsWith('image/'))
+                ?.getAsFile();
+            if (!imageFile) return;
+
+            event.preventDefault();
+            setQuickToolError(null);
+            void insertImageFromBlob(imageFile).catch((error: unknown) => {
+                console.error('Could not paste an image onto the whiteboard:', error);
+                setQuickToolError(error instanceof Error ? error.message : 'Could not paste the clipboard image.');
+            });
+        };
+
+        document.addEventListener('paste', handlePaste);
+        return () => document.removeEventListener('paste', handlePaste);
+    }, [fabricCanvas, insertImageFromBlob]);
+
+    const handleQuickPencilColor = useCallback((color: string) => {
+        setPanMode(false);
+        setState((previous) => ({ ...previous, tool: 'draw', brushColor: color }));
+        setPencilPaletteOpen(false);
+    }, [setPanMode]);
 
     const { handleMouseDown, handleMouseMove, handleMouseUp } = useToolHandlers(
         fabricCanvas,
@@ -582,6 +681,81 @@ export const Whiteboard = () => {
                         )}
                 </div>
             </aside>
+            <div
+                aria-label='Quick tools'
+                className='fixed bottom-4 left-1/2 z-50 flex max-w-[calc(100vw-1rem)] -translate-x-1/2 items-center gap-1 rounded-2xl border border-gray-200 bg-white/95 p-2 shadow-xl backdrop-blur'
+                role='toolbar'
+            >
+                <Button
+                    variant='outline'
+                    onClick={handleClipboardImagePaste}
+                    disabled={!fabricCanvas}
+                    aria-label='Paste image from clipboard'
+                    title='Paste image from clipboard'
+                    className='h-10 w-10 shrink-0 p-0'
+                >
+                    <WhiteboardIcon name='image' />
+                </Button>
+                <div className='relative'>
+                    <Button
+                        variant={state.tool === 'draw' ? 'default' : 'outline'}
+                        onClick={() => setPencilPaletteOpen((open) => !open)}
+                        aria-label='Choose pencil color'
+                        aria-pressed={state.tool === 'draw'}
+                        aria-expanded={pencilPaletteOpen}
+                        aria-controls='quick-pencil-palette'
+                        title='Pencil colors'
+                        className='h-10 w-10 shrink-0 p-0'
+                    >
+                        <WhiteboardIcon name='draw' active={state.tool === 'draw'} color={state.brushColor} />
+                    </Button>
+                    {pencilPaletteOpen && (
+                        <div
+                            id='quick-pencil-palette'
+                            aria-label='Pencil colors'
+                            className='absolute bottom-full left-1/2 mb-2 flex -translate-x-1/2 gap-2 rounded-xl border border-gray-200 bg-white p-2 shadow-xl'
+                            role='group'
+                        >
+                            {[
+                                { name: 'Red', color: '#ef4444' },
+                                { name: 'Black', color: '#000000' },
+                                { name: 'Green', color: '#22c55e' },
+                            ].map(({ name, color }) => (
+                                <button
+                                    key={name}
+                                    type='button'
+                                    aria-label={`${name} pencil`}
+                                    aria-pressed={state.tool === 'draw' && state.brushColor === color}
+                                    title={`${name} pencil`}
+                                    onClick={() => handleQuickPencilColor(color)}
+                                    className={`h-8 w-8 rounded-full border-2 ${state.tool === 'draw' && state.brushColor === color ? 'border-blue-700 ring-2 ring-blue-200' : 'border-white ring-1 ring-gray-300'}`}
+                                    style={{ backgroundColor: color }}
+                                />
+                            ))}
+                        </div>
+                    )}
+                </div>
+                {([
+                    { tool: 'erase', label: 'Eraser' },
+                    { tool: 'pan', label: 'Pan' },
+                    { tool: 'text', label: 'Text' },
+                ] as const).map(({ tool, label }) => (
+                    <Button
+                        key={tool}
+                        variant={state.tool === tool ? 'default' : 'outline'}
+                        onClick={() => {
+                            setPencilPaletteOpen(false);
+                            handleToolClick(tool)();
+                        }}
+                        aria-label={label}
+                        aria-pressed={state.tool === tool}
+                        title={label}
+                        className='h-10 w-10 shrink-0 p-0'
+                    >
+                        <WhiteboardIcon name={tool} active={state.tool === tool} />
+                    </Button>
+                ))}
+            </div>
             <Button
                 variant='outline'
                 onClick={() => setToolbarOpen((open) => !open)}
@@ -745,16 +919,16 @@ export const Whiteboard = () => {
                 </div>
             </div>
             )}
-            {(shareFeedback || connectionError) && (
+            {(shareFeedback || connectionError || quickToolError) && (
                 <div
                     className={`fixed left-14 right-4 top-2 z-[35] flex max-h-[40vh] items-center gap-2 overflow-auto rounded-lg border px-4 py-3 text-sm shadow-xl ${
-                        connectionError || shareFeedbackIsError
+                        connectionError || quickToolError || shareFeedbackIsError
                             ? 'border-red-300 bg-red-50 text-red-900'
                             : 'border-green-300 bg-green-50 text-green-900'
                     }`}
-                    role={connectionError || shareFeedbackIsError ? 'alert' : 'status'}
+                    role={connectionError || quickToolError || shareFeedbackIsError ? 'alert' : 'status'}
                 >
-                    <span>{connectionError || shareFeedback}</span>
+                    <span>{connectionError || quickToolError || shareFeedback}</span>
                     {shareLink && (
                         <input
                             aria-label='Whiteboard share link'
@@ -773,6 +947,7 @@ export const Whiteboard = () => {
                             setShareFeedback(null);
                             setShareLink(null);
                             setShareFeedbackIsError(false);
+                            setQuickToolError(null);
                             clearConnectionError();
                         }}
                     >
