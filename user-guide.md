@@ -9,8 +9,9 @@ Open the whiteboard in a browser. Use the **Show toolbar** button in the
 upper-left corner to open the toolbar; use it again to hide it and make more
 room for the canvas. The toolbar can wrap or scroll on smaller screens.
 
-The canvas is the large work area. Choose a tool from the toolbar, then use it
-on the canvas. The selected tool is highlighted.
+The canvas is the large work area, with a soft off-white background and a
+subtle dotted grid to help with visual orientation. Choose a tool from the
+toolbar, then use it on the canvas. The selected tool is highlighted.
 
 ## Quick toolbar
 
@@ -25,7 +26,7 @@ actions:
   is added as a selectable canvas object.
 - **Pencil**: Choose red, black, or green to start drawing with that color.
 - **Select**: Select, move, or resize objects on the canvas.
-- **Eraser**: Paint over existing content with white.
+- **Eraser**: Paint over existing content with off-white.
 - **Pan**: Drag the canvas to move around without drawing.
 - **Text**: Click the canvas to add a text object.
 
@@ -45,14 +46,14 @@ paste shortcut on the canvas instead.
   when you are finished editing. Empty text is discarded.
 - **Draw**: Draw freehand strokes.
 - **Rectangle**, **Line**, and **Ellipse**: Click and drag to create the shape.
-- **Eraser**: Draw over marks with a white stroke. This paints over content; it
-  does not remove selected objects.
-- **Clear**: Clears the entire canvas and restores its white background. This
-  takes effect as soon as you choose the tool.
+- **Eraser**: Draw over marks with an off-white stroke. This paints over
+  content; it does not remove selected objects.
+- **Clear**: Clears the entire canvas and restores its dotted off-white
+  background. This takes effect as soon as you choose the tool.
 
 The **Color** control sets the color used for drawing and shapes. The **Size**
-slider sets the stroke width, from 1 to 20. The eraser uses white regardless of
-the selected color.
+slider sets the stroke width, from 1 to 20. The eraser uses the off-white
+background color regardless of the selected color.
 
 To remove objects, select them and press **Delete** or **Backspace**. To copy
 and duplicate selected objects, use **Ctrl+C** then **Ctrl+V** on Windows/Linux,

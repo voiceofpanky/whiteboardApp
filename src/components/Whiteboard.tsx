@@ -17,6 +17,7 @@ import type { Tool } from '../Toolbar/Toolbar.types';
 import { useCanvas } from '@/hooks/useCanvas';
 import { useSocket } from '@/hooks/useSocket';
 import { useToolHandlers } from '@/hooks/useToolHandlers';
+import { createWhiteboardBackground } from './Whiteboard/Whiteboard.utils';
 
 type WhiteboardIconName = Tool | 'image' | 'new-board' | 'undo' | 'redo' | 'save' | 'share' | 'zoom-in' | 'zoom-out' | 'pan-up' | 'pan-down' | 'pan-left' | 'pan-right';
 
@@ -490,7 +491,7 @@ export const Whiteboard = () => {
             case 'erase': {
                 fabricCanvas.set('isDrawingMode', true);
                 const brush = new PencilBrush(fabricCanvas);
-                brush.color = '#ffffff';
+                brush.color = '#fafaf8';
                 brush.width = state.brushSize;
                 fabricCanvas.set('freeDrawingBrush', brush);
                 break;
@@ -508,7 +509,7 @@ export const Whiteboard = () => {
             }
             case 'clear': {
                 fabricCanvas.clear();
-                fabricCanvas.set('backgroundColor', '#fff');
+                fabricCanvas.set('backgroundColor', createWhiteboardBackground());
                 fabricCanvas.renderAll();
                 break;
             }

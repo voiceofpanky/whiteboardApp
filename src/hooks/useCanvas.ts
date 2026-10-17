@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActiveSelection, Canvas, FabricObject, IText, Point } from 'fabric';
 import { ExtendedFabricObject } from '@/types/global.types';
-import { generateId } from '@/components/Whiteboard/Whiteboard.utils';
+import { createWhiteboardBackground, generateId } from '@/components/Whiteboard/Whiteboard.utils';
 
 export const useCanvas = () => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -62,7 +62,7 @@ export const useCanvas = () => {
                 };
             })(FabricObject.prototype.toObject);
             const canvas = new Canvas(canvasEl, {
-                backgroundColor: '#fff',
+                backgroundColor: createWhiteboardBackground(),
             });
             canvasInstanceRef.current = canvas;
             const canvasElement = canvas.upperCanvasEl;

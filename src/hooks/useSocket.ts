@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import type { Canvas } from 'fabric';
 import type { SocketDetails } from '@/types/global.types';
+import { createWhiteboardBackground } from '@/components/Whiteboard/Whiteboard.utils';
 
 type CanvasState = ReturnType<Canvas['toJSON']>;
 
@@ -198,7 +199,7 @@ export const useSocket = (canvas: Canvas | null) => {
                         socket.emit('room:leave', { roomId: previousRoomId });
                     }
                     canvas.clear();
-                    canvas.set('backgroundColor', '#fff');
+                    canvas.set('backgroundColor', createWhiteboardBackground());
                     canvas.renderAll();
 
                     const url = new URL(window.location.href);
@@ -226,6 +227,7 @@ export const useSocket = (canvas: Canvas | null) => {
                 applyingRemoteStateRef.current = true;
                 try {
                     await canvas.loadFromJSON(state);
+                    canvas.set('backgroundColor', createWhiteboardBackground());
                     canvas.renderAll();
                 } catch (error) {
                     console.error('Failed to load the shared whiteboard state:', error);
