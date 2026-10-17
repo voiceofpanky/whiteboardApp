@@ -66,6 +66,13 @@ export const useCanvas = () => {
             });
             canvasInstanceRef.current = canvas;
             const canvasElement = canvas.upperCanvasEl;
+            const handleContextMenu = (event: MouseEvent) => event.preventDefault();
+            const handleSelectStart = (event: Event) => event.preventDefault();
+            const handleTouch = (event: TouchEvent) => {
+                if (event.target === canvasElement) {
+                    event.preventDefault();
+                }
+            };
             const handleWheel = (event: WheelEvent) => {
                 event.preventDefault();
                 if (event.ctrlKey || event.metaKey) {
@@ -109,6 +116,10 @@ export const useCanvas = () => {
                 panStartRef.current = null;
                 canvasElement.style.cursor = panModeRef.current ? 'grab' : '';
             };
+            canvasElement.addEventListener('contextmenu', handleContextMenu);
+            canvasElement.addEventListener('selectstart', handleSelectStart);
+            canvasElement.addEventListener('touchstart', handleTouch, { passive: false });
+            canvasElement.addEventListener('touchmove', handleTouch, { passive: false });
             canvasElement.addEventListener('wheel', handleWheel, { passive: false });
             canvasElement.addEventListener('pointerdown', handlePointerDown);
             canvasElement.addEventListener('pointermove', handlePointerMove);
@@ -211,6 +222,10 @@ export const useCanvas = () => {
                 resizeObserver.disconnect();
                 window.removeEventListener('keydown', handleKeyDown);
                 clipboardRef.current = [];
+                canvasElement.removeEventListener('contextmenu', handleContextMenu);
+                canvasElement.removeEventListener('selectstart', handleSelectStart);
+                canvasElement.removeEventListener('touchstart', handleTouch);
+                canvasElement.removeEventListener('touchmove', handleTouch);
                 canvasElement.removeEventListener('wheel', handleWheel);
                 canvasElement.removeEventListener('pointerdown', handlePointerDown);
                 canvasElement.removeEventListener('pointermove', handlePointerMove);

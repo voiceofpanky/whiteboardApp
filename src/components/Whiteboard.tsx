@@ -19,7 +19,8 @@ import { useToolHandlers } from '@/hooks/useToolHandlers';
 
 type WhiteboardIconName = Tool | 'new-board' | 'undo' | 'redo' | 'save' | 'share' | 'zoom-in' | 'zoom-out' | 'pan-up' | 'pan-down' | 'pan-left' | 'pan-right';
 
-const WhiteboardIcon = ({ name }: { name: WhiteboardIconName }) => {
+const WhiteboardIcon = ({ name, active = false }: { name: WhiteboardIconName; active?: boolean }) => {
+    const isPencil = name === 'draw' || name === 'pencil';
     const iconContent = (() => {
         switch (name) {
             case 'select':
@@ -70,12 +71,12 @@ const WhiteboardIcon = ({ name }: { name: WhiteboardIconName }) => {
     return (
         <svg
             aria-hidden='true'
-            className='h-5 w-5'
+            className={`h-5 w-5${isPencil ? ` ${active ? 'text-white' : 'text-gray-700'}` : ''}`}
             fill='none'
             stroke='currentColor'
             strokeLinecap='round'
             strokeLinejoin='round'
-            strokeWidth='1.8'
+            strokeWidth={isPencil ? '2.2' : '1.8'}
             viewBox='0 0 24 24'
         >
             {iconContent}
@@ -404,7 +405,7 @@ export const Whiteboard = () => {
     return (
         <div className='p-2'>
             <h1 className='pointer-events-none fixed left-1/2 top-3 z-30 -translate-x-1/2 whitespace-nowrap rounded-lg border border-green-300 bg-green-50 px-4 py-2 font-sans text-lg font-semibold tracking-tight text-green-900 shadow-md sm:text-xl'>
-                StemSpark4kids Whiteboard
+                StemSpark4kids-Whiteboard
             </h1>
             <Button
                 variant='outline'
@@ -454,7 +455,7 @@ export const Whiteboard = () => {
                         aria-label={t === 'erase' ? 'Eraser' : t === 'text' ? 'Add text' : t.charAt(0).toUpperCase() + t.slice(1)}
                         title={t === 'erase' ? 'Eraser' : t === 'text' ? 'Add text' : t.charAt(0).toUpperCase() + t.slice(1)}
                     >
-                        <WhiteboardIcon name={t} />
+                        <WhiteboardIcon name={t} active={state.tool === t} />
                     </Button>
                 ))}
                 <div className='flex items-center gap-1 border-l border-gray-300 pl-3'>
