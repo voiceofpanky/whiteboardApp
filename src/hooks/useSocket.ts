@@ -9,11 +9,34 @@ interface JoinRoomResponse {
     ok: boolean;
     state?: CanvasState;
     error?: string;
+    participants?: string[];
 }
 
 interface RoomStateUpdate {
     roomId: string;
     state: CanvasState;
+}
+
+interface RoomParticipantsUpdate {
+    roomId: string;
+    participants: string[];
+}
+
+export interface ChatMessage {
+    id: string;
+    senderName: string;
+    text: string;
+    sentAt: number;
+}
+
+interface RoomChatMessage {
+    roomId: string;
+    message: ChatMessage;
+}
+
+interface ChatSendResponse {
+    ok: boolean;
+    error?: string;
 }
 // production url backend : https://whiteboardapp-h2ey.onrender.com
 const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || (
@@ -28,10 +51,49 @@ export const useSocket = (canvas: Canvas | null) => {
     const applyingRemoteStateRef = useRef(false);
     const remoteStateQueueRef = useRef<Promise<void>>(Promise.resolve());
     const updateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const participantNameRef = useRef<string | null>(null);
     const [socketDetails, setSocketDetails] = useState<SocketDetails | null>(null);
+    const [participants, setParticipants] = useState<string[]>([]);
+    const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [connectionError, setConnectionError] = useState<string | null>(null);
+    const getParticipantName = useCallback(() => {
+        if (participantNameRef.current) return participantNameRef.current;
+
+        const enteredName = window.prompt('Enter your name to join this whiteboard (cancel or leave blank to join as Guest):');
+        participantNameRef.current = enteredName?.trim().slice(0, 40) || 'Guest';
+        return participantNameRef.current;
+    }, []);
     const clearConnectionError = useCallback(() => {
         setConnectionError(null);
+    }, []);
+    const sendChatMessage = useCallback((text: string): Promise<void> => {
+        const socket = socketRef.current;
+        const roomId = roomIdRef.current;
+        const message = text.trim();
+        if (!socket?.connected || !roomId) {
+            return Promise.reject(new Error('Join a shared whiteboard before sending a chat message.'));
+        }
+        if (!message || message.length > 1000) {
+            return Promise.reject(new Error('Chat messages must contain 1 to 1000 characters.'));
+        }
+
+        return new Promise((resolve, reject) => {
+            socket.timeout(10000).emit(
+                'chat:send',
+                { roomId, text: message },
+                (error: Error | null, response?: ChatSendResponse) => {
+                    if (error) {
+                        reject(new Error(
+                            'The chat server did not acknowledge the message. Deploy the latest server.mjs with chat support, then try again.'
+                        ));
+                    } else if (!response?.ok) {
+                        reject(new Error(response?.error || 'Could not send the chat message.'));
+                    } else {
+                        resolve();
+                    }
+                }
+            );
+        });
     }, []);
 
     const shareBoard = useCallback((): Promise<string> => {
@@ -40,6 +102,7 @@ export const useSocket = (canvas: Canvas | null) => {
             return Promise.reject(new Error('The whiteboard server is not connected yet.'));
         }
 
+        const participantName = getParticipantName();
         const existingRoomId = roomIdRef.current;
         const roomId = existingRoomId ?? crypto.randomUUID();
 
@@ -55,6 +118,8 @@ export const useSocket = (canvas: Canvas | null) => {
                 }
 
                 roomIdRef.current = roomId;
+                if (existingRoomId !== roomId) setChatMessages([]);
+                setParticipants(response.participants ?? [participantName]);
                 const url = new URL(window.location.href);
                 url.searchParams.set('room', roomId);
                 window.history.replaceState(window.history.state, '', url);
@@ -63,11 +128,11 @@ export const useSocket = (canvas: Canvas | null) => {
 
             socket.timeout(10000).emit(
                 'room:join',
-                { roomId, initialState: canvas.toJSON() },
+                { roomId, initialState: canvas.toJSON(), participantName },
                 join
             );
         });
-    }, [canvas]);
+    }, [canvas, getParticipantName]);
 
     const startNewBoard = useCallback((): Promise<string> => {
         const socket = socketRef.current;
@@ -75,6 +140,7 @@ export const useSocket = (canvas: Canvas | null) => {
             return Promise.reject(new Error('The whiteboard server is not connected yet.'));
         }
 
+        const participantName = getParticipantName();
         const roomId = crypto.randomUUID();
         const initialState = { ...canvas.toJSON(), objects: [] };
         const previousRoomId = roomIdRef.current;
@@ -93,7 +159,7 @@ export const useSocket = (canvas: Canvas | null) => {
         return new Promise((resolve, reject) => {
             socket.timeout(10000).emit(
                 'room:join',
-                { roomId, initialState },
+                { roomId, initialState, participantName },
                 (error: Error | null, response?: JoinRoomResponse) => {
                     if (error) {
                         reject(new Error('The server did not respond while creating a new whiteboard.'));
@@ -105,6 +171,8 @@ export const useSocket = (canvas: Canvas | null) => {
                     }
 
                     roomIdRef.current = roomId;
+                    setChatMessages([]);
+                    setParticipants(response.participants ?? [participantName]);
                     if (previousRoomId) {
                         socket.emit('room:leave', { roomId: previousRoomId });
                     }
@@ -119,7 +187,7 @@ export const useSocket = (canvas: Canvas | null) => {
                 }
             );
         });
-    }, [canvas]);
+    }, [canvas, getParticipantName]);
 
     useEffect(() => {
         if (!canvas) return;
@@ -151,9 +219,10 @@ export const useSocket = (canvas: Canvas | null) => {
             const roomId = new URLSearchParams(window.location.search).get('room');
             if (!roomId) return;
 
+            const participantName = getParticipantName();
             socket.timeout(10000).emit(
                 'room:join',
-                { roomId, initialState: canvas.toJSON() },
+                { roomId, initialState: canvas.toJSON(), participantName },
                 (error: Error | null, response?: JoinRoomResponse) => {
                     if (error || !response?.ok || !response.state) {
                         const message = response?.error || 'Could not join this whiteboard room.';
@@ -162,7 +231,10 @@ export const useSocket = (canvas: Canvas | null) => {
                         return;
                     }
 
+                    const previousRoomId = roomIdRef.current;
                     roomIdRef.current = roomId;
+                    if (previousRoomId !== roomId) setChatMessages([]);
+                    setParticipants(response.participants ?? [participantName]);
                     applyRoomState(response.state);
                 }
             );
@@ -181,11 +253,22 @@ export const useSocket = (canvas: Canvas | null) => {
 
         const handleDisconnect = () => {
             setSocketDetails(null);
+            setParticipants([]);
         };
 
         const handleRoomState = (update: RoomStateUpdate) => {
             if (update.roomId !== roomIdRef.current) return;
             applyRoomState(update.state);
+        };
+
+        const handleRoomParticipants = (update: RoomParticipantsUpdate) => {
+            if (update.roomId !== roomIdRef.current) return;
+            setParticipants(update.participants);
+        };
+
+        const handleChatMessage = (update: RoomChatMessage) => {
+            if (update.roomId !== roomIdRef.current) return;
+            setChatMessages((messages) => [...messages, update.message].slice(-200));
         };
 
         const publishState = () => {
@@ -220,6 +303,8 @@ export const useSocket = (canvas: Canvas | null) => {
         socket.on('connect_error', handleConnectError);
         socket.on('disconnect', handleDisconnect);
         socket.on('room:state', handleRoomState);
+        socket.on('room:participants', handleRoomParticipants);
+        socket.on('chat:message', handleChatMessage);
         socket.on('room:error', handleRoomError);
         canvas.on('object:added', publishState);
         canvas.on('object:removed', publishState);
@@ -244,12 +329,23 @@ export const useSocket = (canvas: Canvas | null) => {
             socket.off('connect_error', handleConnectError);
             socket.off('disconnect', handleDisconnect);
             socket.off('room:state', handleRoomState);
+            socket.off('room:participants', handleRoomParticipants);
+            socket.off('chat:message', handleChatMessage);
             socket.off('room:error', handleRoomError);
             socket.disconnect();
             socketRef.current = null;
             roomIdRef.current = null;
         };
-    }, [canvas]);
+    }, [canvas, getParticipantName]);
 
-    return { socketDetails, connectionError, clearConnectionError, shareBoard, startNewBoard };
+    return {
+        socketDetails,
+        participants,
+        chatMessages,
+        sendChatMessage,
+        connectionError,
+        clearConnectionError,
+        shareBoard,
+        startNewBoard,
+    };
 };

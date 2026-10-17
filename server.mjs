@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { Server } from 'socket.io';
@@ -42,17 +43,36 @@ const io = new Server(httpServer, {
     maxHttpBufferSize: maxStateSize,
 });
 
+const getRoomParticipants = (roomId, excludedSocketId) => {
+    const socketIds = io.sockets.adapter.rooms.get(roomId) || [];
+    return [...socketIds]
+        .filter((socketId) => socketId !== excludedSocketId)
+        .map((socketId) => io.sockets.sockets.get(socketId)?.data.participantName)
+        .filter((name) => typeof name === 'string');
+};
+
+const broadcastRoomParticipants = (roomId, excludedSocketId) => {
+    io.to(roomId).emit('room:participants', {
+        roomId,
+        participants: getRoomParticipants(roomId, excludedSocketId),
+    });
+};
+
 io.on('connection', (socket) => {
     socket.on('room:leave', ({ roomId } = {}) => {
-        if (typeof roomId === 'string' && roomIdPattern.test(roomId)) {
+        if (typeof roomId === 'string' && roomIdPattern.test(roomId) && socket.rooms.has(roomId)) {
             socket.leave(roomId);
+            if (socket.data.whiteboardRoomId === roomId) {
+                delete socket.data.whiteboardRoomId;
+            }
+            broadcastRoomParticipants(roomId);
         }
     });
 
     socket.on('room:join', (payload, acknowledge) => {
         if (typeof acknowledge !== 'function') return;
 
-        const { roomId, initialState } = payload || {};
+        const { roomId, initialState, participantName } = payload || {};
         if (typeof roomId !== 'string' || !roomIdPattern.test(roomId)) {
             acknowledge({ ok: false, error: 'Invalid whiteboard room link.' });
             return;
@@ -81,8 +101,58 @@ io.on('connection', (socket) => {
             }
         }
 
+        const name = typeof participantName === 'string'
+            ? participantName.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 40) || 'Guest'
+            : 'Guest';
+        const previousRoomId = socket.data.whiteboardRoomId;
+        if (previousRoomId && previousRoomId !== roomId) {
+            socket.leave(previousRoomId);
+            broadcastRoomParticipants(previousRoomId);
+        }
+
+        socket.data.participantName = name;
+        socket.data.whiteboardRoomId = roomId;
         socket.join(roomId);
-        acknowledge({ ok: true, state: rooms[roomId] });
+        const participants = getRoomParticipants(roomId);
+        broadcastRoomParticipants(roomId);
+        acknowledge({ ok: true, state: rooms[roomId], participants });
+    });
+
+    socket.on('disconnecting', () => {
+        for (const roomId of socket.rooms) {
+            if (roomId !== socket.id) {
+                broadcastRoomParticipants(roomId, socket.id);
+            }
+        }
+    });
+
+    socket.on('chat:send', (payload, acknowledge) => {
+        if (typeof acknowledge !== 'function') return;
+
+        const { roomId, text } = payload || {};
+        if (
+            typeof roomId !== 'string' ||
+            !roomIdPattern.test(roomId) ||
+            !socket.rooms.has(roomId) ||
+            socket.data.whiteboardRoomId !== roomId ||
+            typeof text !== 'string' ||
+            text.trim().length === 0 ||
+            text.length > 1000
+        ) {
+            acknowledge({ ok: false, error: 'Could not send this chat message.' });
+            return;
+        }
+
+        io.to(roomId).emit('chat:message', {
+            roomId,
+            message: {
+                id: randomUUID(),
+                senderName: socket.data.participantName || 'Guest',
+                text: text.trim(),
+                sentAt: Date.now(),
+            },
+        });
+        acknowledge({ ok: true });
     });
 
     socket.on('room:update', (payload) => {

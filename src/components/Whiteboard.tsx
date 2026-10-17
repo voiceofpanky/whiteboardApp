@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import {
     IText,
     PencilBrush,
@@ -97,6 +97,9 @@ export const Whiteboard = () => {
     } = useCanvas();
     const {
         socketDetails,
+        participants,
+        chatMessages,
+        sendChatMessage,
         connectionError,
         clearConnectionError,
         shareBoard,
@@ -115,6 +118,12 @@ export const Whiteboard = () => {
     const [shareFeedback, setShareFeedback] = useState<string | null>(null);
     const [shareFeedbackIsError, setShareFeedbackIsError] = useState(false);
     const [toolbarOpen, setToolbarOpen] = useState(false);
+    const [sidePanelOpen, setSidePanelOpen] = useState(false);
+    const [sidePanelTab, setSidePanelTab] = useState<'chat' | 'participants'>('chat');
+    const [chatDraft, setChatDraft] = useState('');
+    const [chatError, setChatError] = useState<string | null>(null);
+    const [chatSending, setChatSending] = useState(false);
+    const chatMessagesEndRef = useRef<HTMLDivElement>(null);
     const [state, setState] = useState<WhiteboardState>({
         tool: 'select',
         brushColor: '#000000',
@@ -129,6 +138,28 @@ export const Whiteboard = () => {
     useEffect(() => {
         toolRef.current = state.tool;
     }, [state.tool]);
+
+    useEffect(() => {
+        chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [chatMessages, sidePanelOpen, sidePanelTab]);
+
+    const handleChatSubmit = async (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        const message = chatDraft.trim();
+        if (!message || chatSending) return;
+
+        setChatSending(true);
+        setChatError(null);
+        try {
+            await sendChatMessage(message);
+            setChatDraft('');
+        } catch (error) {
+            console.error('Could not send whiteboard chat message:', error);
+            setChatError(error instanceof Error ? error.message : 'Could not send the chat message.');
+        } finally {
+            setChatSending(false);
+        }
+    };
 
     const handleToolClick = useCallback(
         (t: Tool) => () => {
@@ -407,6 +438,150 @@ export const Whiteboard = () => {
             <h1 className='pointer-events-none fixed left-1/2 top-3 z-30 -translate-x-1/2 whitespace-nowrap rounded-lg border border-green-300 bg-green-50 px-4 py-2 font-sans text-lg font-semibold tracking-tight text-green-900 shadow-md sm:text-xl'>
                 StemSpark4kids-Whiteboard
             </h1>
+            <aside
+                aria-label='Whiteboard chat and participants'
+                className='fixed right-0 top-14 bottom-3 z-[60] flex w-[min(22rem,calc(100vw-1rem))] items-start text-sm transition-transform duration-300 ease-in-out'
+                style={{ transform: sidePanelOpen ? 'translateX(0)' : 'translateX(calc(100% - 3rem))' }}
+            >
+                <button
+                    type='button'
+                    aria-expanded={sidePanelOpen}
+                    aria-controls='whiteboard-side-panel'
+                    aria-label={sidePanelOpen ? 'Collapse whiteboard side panel' : 'Expand whiteboard side panel'}
+                    onClick={() => setSidePanelOpen((open) => !open)}
+                    className='relative mt-4 flex h-16 w-12 shrink-0 flex-col items-center justify-center gap-1 rounded-l-lg border border-r-0 border-blue-900 bg-blue-700 text-white shadow-lg hover:bg-blue-800 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-900'
+                >
+                    <svg
+                        aria-hidden='true'
+                        className={`h-4 w-4 transition-transform ${sidePanelOpen ? 'rotate-180' : ''}`}
+                        fill='none'
+                        stroke='currentColor'
+                        strokeLinecap='round'
+                        strokeLinejoin='round'
+                        strokeWidth='2'
+                        viewBox='0 0 24 24'
+                    >
+                        <path d='m15 18-6-6 6-6' />
+                    </svg>
+                    <span className='text-[10px] font-semibold'>Chat</span>
+                    {chatMessages.length > 0 && (
+                        <span className='absolute left-1 top-3 rounded-full bg-white px-1 text-[10px] font-bold text-blue-800'>
+                            {chatMessages.length}
+                        </span>
+                    )}
+                </button>
+                <div
+                    id='whiteboard-side-panel'
+                    aria-hidden={!sidePanelOpen}
+                    inert={!sidePanelOpen}
+                    className='flex h-full w-[calc(100%-3rem)] flex-col overflow-hidden rounded-l-xl border border-gray-300 bg-white/95 shadow-xl backdrop-blur'
+                >
+                        <div className='border-b border-gray-200 px-3 py-3 pr-14'>
+                            <h2 className='font-semibold text-gray-900'>Whiteboard</h2>
+                            <div className='mt-3 flex gap-2' role='tablist' aria-label='Whiteboard side panel'>
+                                <button
+                                    type='button'
+                                    role='tab'
+                                    aria-selected={sidePanelTab === 'chat'}
+                                    aria-controls='whiteboard-chat-tab'
+                                    onClick={() => setSidePanelTab('chat')}
+                                    className={`rounded-md px-3 py-1.5 font-medium ${sidePanelTab === 'chat' ? 'bg-blue-100 text-blue-900' : 'text-gray-600 hover:bg-gray-100'}`}
+                                >
+                                    Chat
+                                </button>
+                                <button
+                                    type='button'
+                                    role='tab'
+                                    aria-selected={sidePanelTab === 'participants'}
+                                    aria-controls='whiteboard-participants-tab'
+                                    onClick={() => setSidePanelTab('participants')}
+                                    className={`rounded-md px-3 py-1.5 font-medium ${sidePanelTab === 'participants' ? 'bg-blue-100 text-blue-900' : 'text-gray-600 hover:bg-gray-100'}`}
+                                >
+                                    Participants ({participants.length})
+                                </button>
+                            </div>
+                        </div>
+                        {sidePanelTab === 'chat' ? (
+                            <section
+                                id='whiteboard-chat-tab'
+                                role='tabpanel'
+                                className='flex min-h-0 flex-1 flex-col'
+                            >
+                                <div
+                                    className='flex-1 space-y-3 overflow-y-auto p-3'
+                                    role='log'
+                                    aria-label='Chat messages'
+                                    aria-live='polite'
+                                >
+                                    {chatMessages.length === 0 && (
+                                        <p className='text-center text-gray-500'>
+                                            {participants.length > 0
+                                                ? 'No messages yet. Say hello!'
+                                                : 'Share this board to start chatting.'}
+                                        </p>
+                                    )}
+                                    {chatMessages.map((message) => (
+                                        <article key={message.id} className='rounded-lg bg-gray-100 px-3 py-2'>
+                                            <div className='flex items-baseline justify-between gap-2'>
+                                                <p className='truncate font-semibold text-gray-800'>{message.senderName}</p>
+                                                <time
+                                                    className='shrink-0 text-xs text-gray-500'
+                                                    dateTime={new Date(message.sentAt).toISOString()}
+                                                >
+                                                    {new Date(message.sentAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                                                </time>
+                                            </div>
+                                            <p className='mt-1 whitespace-pre-wrap break-words text-gray-700'>{message.text}</p>
+                                        </article>
+                                    ))}
+                                    <div ref={chatMessagesEndRef} />
+                                </div>
+                                <form onSubmit={handleChatSubmit} className='border-t border-gray-200 p-3'>
+                                    {chatError && <p className='mb-2 text-xs text-red-700' role='alert'>{chatError}</p>}
+                                    <label className='sr-only' htmlFor='whiteboard-chat-message'>Chat message</label>
+                                    <div className='flex gap-2'>
+                                        <Input
+                                            id='whiteboard-chat-message'
+                                            value={chatDraft}
+                                            onChange={(event) => setChatDraft(event.target.value)}
+                                            maxLength={1000}
+                                            placeholder={participants.length > 0 ? 'Write a message...' : 'Share this board to chat'}
+                                            autoComplete='off'
+                                        />
+                                        <Button
+                                            type='submit'
+                                            disabled={!chatDraft.trim() || chatSending || participants.length === 0}
+                                            className='shrink-0 bg-blue-700 px-3 text-white hover:bg-blue-800'
+                                        >
+                                            {chatSending ? 'Sending...' : 'Send'}
+                                        </Button>
+                                    </div>
+                                </form>
+                            </section>
+                        ) : (
+                            <section
+                                id='whiteboard-participants-tab'
+                                role='tabpanel'
+                                className='min-h-0 flex-1 overflow-y-auto p-3'
+                            >
+                                <h3 className='font-semibold text-gray-700'>In this board</h3>
+                                <ul className='mt-2 space-y-1.5'>
+                                    {participants.map((participant, index) => (
+                                        <li
+                                            key={`${participant}-${index}`}
+                                            className='rounded-md bg-gray-100 px-2 py-1.5 text-gray-800'
+                                        >
+                                            {participant}
+                                        </li>
+                                    ))}
+                                    {participants.length === 0 && (
+                                        <li className='text-gray-500'>No participants yet. Share this board to invite others.</li>
+                                    )}
+                                </ul>
+                            </section>
+                        )}
+                </div>
+            </aside>
             <Button
                 variant='outline'
                 onClick={() => setToolbarOpen((open) => !open)}
@@ -625,7 +800,7 @@ export const Whiteboard = () => {
                 />
             </div>
             {socketDetails?.clientId && (
-                <div className='fixed bottom-4 right-4 z-50 p-3 bg-black text-white text-sm rounded-xl shadow-xl opacity-90'>
+                <div className='fixed bottom-4 left-4 z-30 rounded-xl bg-black p-3 text-sm text-white opacity-90 shadow-xl'>
                     🧩 Connected {' '}
                     {/* <span className='font-mono text-green-300'>
                         {socketDetails.clientId}
